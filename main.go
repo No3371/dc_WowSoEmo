@@ -439,6 +439,11 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 		return
 	}
 
+	if len(emojis) == 0 {
+		respondError(i, "No emoji data found for this server.")
+		return
+	}
+
 	response := createEmojiListMessage(emojis, 0)
 	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
