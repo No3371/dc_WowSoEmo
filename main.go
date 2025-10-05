@@ -241,8 +241,8 @@ func isInGuild(i *discord.InteractionEvent) bool {
 
 // Get emojis from database for a server
 func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
-	query := `SELECT emote_name, emote_id, usage_count FROM emojis WHERE server_id = ? ORDER BY usage_count DESC OFFSET ? LIMIT ?`
-	rows, err := db.Query(query, serverID, offset, limit)
+	query := `SELECT emote_name, emote_id, usage_count FROM emojis WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +261,8 @@ func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 
 // Get stickers from database for a server
 func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
-	query := `SELECT sticker_name, sticker_id, usage_count FROM stickers WHERE server_id = ? ORDER BY usage_count DESC OFFSET ? LIMIT ?`
-	rows, err := db.Query(query, serverID, offset, limit)
+	query := `SELECT sticker_name, sticker_id, usage_count FROM stickers WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
