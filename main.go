@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS stickers (
 	last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(server_id, sticker_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_emojis_server_id_emote_id_usage_count ON emojis(server_id, emote_id, usage_count);
+
+CREATE INDEX IF NOT EXISTS idx_stickers_server_id_sticker_id_usage_count ON stickers(server_id, sticker_id, usage_count);
 `
 
 func initDB() error {
