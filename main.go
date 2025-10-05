@@ -240,9 +240,9 @@ func isInGuild(i *discord.InteractionEvent) bool {
 }
 
 // Get emojis from database for a server
-func getEmojis(serverID int64) ([]EmojiData, error) {
-	query := `SELECT emote_name, emote_id, usage_count FROM emojis WHERE server_id = ? ORDER BY usage_count DESC`
-	rows, err := db.Query(query, serverID)
+func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
+	query := `SELECT emote_name, emote_id, usage_count FROM emojis WHERE server_id = ? ORDER BY usage_count DESC OFFSET ? LIMIT ?`
+	rows, err := db.Query(query, serverID, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -260,9 +260,9 @@ func getEmojis(serverID int64) ([]EmojiData, error) {
 }
 
 // Get stickers from database for a server
-func getStickers(serverID int64) ([]StickerData, error) {
-	query := `SELECT sticker_name, sticker_id, usage_count FROM stickers WHERE server_id = ? ORDER BY usage_count DESC`
-	rows, err := db.Query(query, serverID)
+func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
+	query := `SELECT sticker_name, sticker_id, usage_count FROM stickers WHERE server_id = ? ORDER BY usage_count DESC OFFSET ? LIMIT ?`
+	rows, err := db.Query(query, serverID, offset, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +432,7 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 	}
 
 	serverID := int64(i.GuildID)
-	emojis, err := getEmojis(serverID)
+	emojis, err := getEmojis(serverID, 0, 25)
 	if err != nil {
 		log.Printf("Error fetching emojis: %v", err)
 		respondError(i, "Failed to fetch emoji data.")
@@ -461,7 +461,7 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 	}
 
 	serverID := int64(i.GuildID)
-	stickers, err := getStickers(serverID)
+	stickers, err := getStickers(serverID, 0, 5)
 	if err != nil {
 		log.Printf("Error fetching stickers: %v", err)
 		respondError(i, "Failed to fetch sticker data.")
@@ -544,14 +544,14 @@ func handleButtonInteraction(i *gateway.InteractionCreateEvent) {
 	var response api.InteractionResponseData
 
 	if strings.HasPrefix(customID, "emoji_page:") {
-		emojis, err := getEmojis(serverID)
+		emojis, err := getEmojis(serverID, 25*page, 25)
 		if err != nil {
 			log.Printf("Error fetching emojis: %v", err)
 			return
 		}
 		response = createEmojiListMessage(emojis, page)
 	} else if strings.HasPrefix(customID, "sticker_page:") {
-		stickers, err := getStickers(serverID)
+		stickers, err := getStickers(serverID, 5*page, 5)
 		if err != nil {
 			log.Printf("Error fetching stickers: %v", err)
 			return
@@ -614,8 +614,6 @@ func handleInteractionCreate(i *gateway.InteractionCreateEvent) {
 // Register application commands
 func registerCommands(s *state.State, appID discord.AppID) error {
 	manageGuildPerm := discord.NewPermissions(discord.PermissionManageGuild)
-
-	s.DeleteCommand(appID, discord.CommandID(1252624993214662697))
 
 	commands := []api.CreateCommandData{
 		{
