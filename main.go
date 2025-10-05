@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -93,7 +94,6 @@ func decreaseCustomEmoji(emojiID int64, serverID int64) error {
 			WHEN usage_count > 0 THEN usage_count - 1 
 			ELSE 0 
 		END,
-		last_used = CURRENT_TIMESTAMP
 		WHERE server_id = ? AND emote_id = ?
 	`
 	_, err := db.Exec(query, serverID, emojiID)
@@ -226,9 +226,10 @@ func handleMessageReactionRemove(r *gateway.MessageReactionRemoveEvent) {
 
 // Emoji data for pagination
 type EmojiData struct {
-	Name  string
-	ID    int64
-	Count int
+	Name     string
+	ID       int64
+	Count    int
+	LastUsed time.Time
 }
 
 // Sticker data for pagination
@@ -236,6 +237,7 @@ type StickerData struct {
 	Name  string
 	ID    int64
 	Count int
+	LastUsed time.Time
 }
 
 // Check if user is in a guild (permission check is done by Discord via DefaultMemberPermissions)
@@ -351,7 +353,7 @@ func createEmojiListMessage(emojis []EmojiData, page int) api.InteractionRespons
 	} else {
 		for i := start; i < end; i++ {
 			e := emojis[i]
-			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d**\n", e.Name, e.ID, e.Count))
+			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 		}
 	}
 
@@ -398,11 +400,11 @@ func createStickerListMessage(stickers []StickerData, page int) api.InteractionR
 	for i := start; i < end; i++ {
 		s := stickers[i]
 		embeds = append(embeds, discord.Embed{
-			Title:       fmt.Sprintf("%s x%d", s.Name, s.Count),
-			Image:       &discord.EmbedImage{URL: fmt.Sprintf("https://media.discordapp.net/stickers/%d.webp?size=96&quality=lossless", s.ID)},
+			Title: fmt.Sprintf("%s x%d", s.Name, s.Count),
+			Image: &discord.EmbedImage{URL: fmt.Sprintf("https://media.discordapp.net/stickers/%d.webp?size=96&quality=lossless", s.ID)},
 		})
 	}
-	
+
 	return api.InteractionResponseData{
 		Components: &components,
 		Flags:      discord.EphemeralMessage,
