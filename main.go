@@ -234,9 +234,9 @@ type EmojiData struct {
 
 // Sticker data for pagination
 type StickerData struct {
-	Name  string
-	ID    int64
-	Count int
+	Name     string
+	ID       int64
+	Count    int
 	LastUsed time.Time
 }
 
@@ -247,7 +247,7 @@ func isInGuild(i *discord.InteractionEvent) bool {
 
 // Get emojis from database for a server
 func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
-	query := `SELECT emote_name, emote_id, usage_count FROM emojis WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	query := `SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
 	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -257,7 +257,7 @@ func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 	var emojis []EmojiData
 	for rows.Next() {
 		var e EmojiData
-		if err := rows.Scan(&e.Name, &e.ID, &e.Count); err != nil {
+		if err := rows.Scan(&e.Name, &e.ID, &e.Count, &e.LastUsed); err != nil {
 			return nil, err
 		}
 		emojis = append(emojis, e)
@@ -267,7 +267,7 @@ func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 
 // Get stickers from database for a server
 func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
-	query := `SELECT sticker_name, sticker_id, usage_count FROM stickers WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	query := `SELECT sticker_name, sticker_id, usage_count, last_used FROM stickers WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
 	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -277,7 +277,7 @@ func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
 	var stickers []StickerData
 	for rows.Next() {
 		var s StickerData
-		if err := rows.Scan(&s.Name, &s.ID, &s.Count); err != nil {
+		if err := rows.Scan(&s.Name, &s.ID, &s.Count, &s.LastUsed); err != nil {
 			return nil, err
 		}
 		stickers = append(stickers, s)
