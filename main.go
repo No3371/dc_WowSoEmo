@@ -431,6 +431,12 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 		return
 	}
 
+	share := false
+	if len(i.Data.(*discord.CommandInteraction).Options) > 0 {
+		opts := i.Data.(*discord.CommandInteraction).Options
+		share, _= opts.Find("share").BoolValue()
+	}
+
 	serverID := int64(i.GuildID)
 
 	totalEmojis, err := countEmojis(serverID)
@@ -453,6 +459,11 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 	}
 
 	response := createEmojiListMessage(emojis, 0, totalEmojis/25+1)
+
+	if share {
+		response.Flags &= ^discord.EphemeralMessage
+	}
+
 	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &response,
@@ -466,6 +477,12 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 	if !isInGuild(&i.InteractionEvent) {
 		respondError(i, "This command can only be used in a server.")
 		return
+	}
+
+	share := false
+	if len(i.Data.(*discord.CommandInteraction).Options) > 0 {
+		opts := i.Data.(*discord.CommandInteraction).Options
+		share, _= opts.Find("share").BoolValue()
 	}
 
 	serverID := int64(i.GuildID)
@@ -489,6 +506,11 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 	}
 
 	response := createStickerListMessage(stickers, 0, totalStickers/5+1)
+
+	if share {
+		response.Flags &= ^discord.EphemeralMessage
+	}
+
 	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &response,
@@ -629,11 +651,17 @@ func registerCommands(s *state.State, appID discord.AppID) error {
 			Name:                     "listemotes",
 			Description:              "List custom emoji usage statistics (Moderator only)",
 			DefaultMemberPermissions: manageGuildPerm,
+			Options: []discord.CommandOption{
+				discord.NewBooleanOption("share", "Everyone can see the list", false),
+			},
 		},
 		{
 			Name:                     "liststickers",
 			Description:              "List sticker usage statistics (Moderator only)",
 			DefaultMemberPermissions: manageGuildPerm,
+			Options: []discord.CommandOption{
+				discord.NewBooleanOption("share", "Everyone can see the list", false),
+			},
 		},
 		{
 			Name:                     "resetcount",
