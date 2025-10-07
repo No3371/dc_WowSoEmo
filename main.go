@@ -245,6 +245,26 @@ func isInGuild(i *discord.InteractionEvent) bool {
 	return i.Member != nil && i.GuildID.IsValid()
 }
 
+func countEmojis(serverID int64) (int, error) {
+	query := `SELECT COUNT(*) FROM emojis WHERE server_id = ?`
+	var count int
+	err := db.QueryRow(query, serverID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func countStickers(serverID int64) (int, error) {
+	query := `SELECT COUNT(*) FROM stickers WHERE server_id = ?`
+	var count int
+	err := db.QueryRow(query, serverID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // Get emojis from database for a server
 func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 	query := `SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
@@ -332,18 +352,8 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 }
 
 // Create emoji list message
-func createEmojiListMessage(emojis []EmojiData, page int) api.InteractionResponseData {
+func createEmojiListMessage(emojis []EmojiData, page int, totalPages int) api.InteractionResponseData {
 	const perPage = 25
-	totalPages := (len(emojis) + perPage - 1) / perPage
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	start := page * perPage
-	end := start + perPage
-	if end > len(emojis) {
-		end = len(emojis)
-	}
 
 	var content strings.Builder
 	content.WriteString("**Custom Emoji Usage Statistics**\n\n")
@@ -351,17 +361,14 @@ func createEmojiListMessage(emojis []EmojiData, page int) api.InteractionRespons
 	if len(emojis) == 0 {
 		content.WriteString("No emoji data found for this server.")
 	} else {
-		for i := start; i < end; i++ {
+		for i := 0; i < perPage; i++ {
 			e := emojis[i]
 			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 		}
 	}
 
-	var components discord.ContainerComponents
-	if len(emojis) > 0 {
-		components = discord.ContainerComponents{
-			createPaginationButtons(page, totalPages, "emoji_page"),
-		}
+	var components discord.ContainerComponents = discord.ContainerComponents{
+		createPaginationButtons(page, totalPages, "emoji_page"),
 	}
 
 	return api.InteractionResponseData{
@@ -372,32 +379,19 @@ func createEmojiListMessage(emojis []EmojiData, page int) api.InteractionRespons
 }
 
 // Create sticker list message
-func createStickerListMessage(stickers []StickerData, page int) api.InteractionResponseData {
+func createStickerListMessage(stickers []StickerData, page int, totalPages int) api.InteractionResponseData {
 	const perPage = 5
-	totalPages := (len(stickers) + perPage - 1) / perPage
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	start := page * perPage
-	end := start + perPage
-	if end > len(stickers) {
-		end = len(stickers)
-	}
 
 	var content strings.Builder
 	content.WriteString("**Sticker Usage Statistics**\n\n")
 
-	var components discord.ContainerComponents
-	if len(stickers) > 0 {
-		components = discord.ContainerComponents{
-			createPaginationButtons(page, totalPages, "sticker_page"),
-		}
+	var components discord.ContainerComponents = discord.ContainerComponents{
+		createPaginationButtons(page, totalPages, "sticker_page"),
 	}
 
 	embeds := []discord.Embed{}
 
-	for i := start; i < end; i++ {
+	for i := 0; i < perPage; i++ {
 		s := stickers[i]
 		embeds = append(embeds, discord.Embed{
 			Title: fmt.Sprintf("%s x%d", s.Name, s.Count),
@@ -438,6 +432,14 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 	}
 
 	serverID := int64(i.GuildID)
+
+	totalEmojis, err := countEmojis(serverID)
+	if err != nil {
+		log.Printf("Error counting emojis: %v", err)
+		respondError(i, "Failed to count emojis.")
+		return
+	}
+
 	emojis, err := getEmojis(serverID, 0, 25)
 	if err != nil {
 		log.Printf("Error fetching emojis: %v", err)
@@ -450,7 +452,7 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 		return
 	}
 
-	response := createEmojiListMessage(emojis, 0)
+	response := createEmojiListMessage(emojis, 0, totalEmojis/25+1)
 	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &response,
@@ -467,6 +469,13 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 	}
 
 	serverID := int64(i.GuildID)
+
+	totalStickers, err := countStickers(serverID)
+	if err != nil {
+		log.Printf("Error counting stickers: %v", err)
+		respondError(i, "Failed to count stickers.")
+		return
+	}
 	stickers, err := getStickers(serverID, 0, 5)
 	if err != nil {
 		log.Printf("Error fetching stickers: %v", err)
@@ -479,7 +488,7 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 		return
 	}
 
-	response := createStickerListMessage(stickers, 0)
+	response := createStickerListMessage(stickers, 0, totalStickers/5+1)
 	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &response,
@@ -550,19 +559,29 @@ func handleButtonInteraction(i *gateway.InteractionCreateEvent) {
 	var response api.InteractionResponseData
 
 	if strings.HasPrefix(customID, "emoji_page:") {
+		totalEmojis, err := countEmojis(serverID)
+		if err != nil {
+			log.Printf("Error counting emojis: %v", err)
+			return
+		}
 		emojis, err := getEmojis(serverID, 25*page, 25)
 		if err != nil {
 			log.Printf("Error fetching emojis: %v", err)
 			return
 		}
-		response = createEmojiListMessage(emojis, page)
+		response = createEmojiListMessage(emojis, page, totalEmojis/25+1)
 	} else if strings.HasPrefix(customID, "sticker_page:") {
+		totalStickers, err := countStickers(serverID)
+		if err != nil {
+			log.Printf("Error counting stickers: %v", err)
+			return
+		}
 		stickers, err := getStickers(serverID, 5*page, 5)
 		if err != nil {
 			log.Printf("Error fetching stickers: %v", err)
 			return
 		}
-		response = createStickerListMessage(stickers, page)
+		response = createStickerListMessage(stickers, page, totalStickers/5+1)
 	} else {
 		return
 	}
