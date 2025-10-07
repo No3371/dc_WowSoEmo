@@ -361,7 +361,7 @@ func createEmojiListMessage(emojis []EmojiData, page int, totalPages int) api.In
 	if len(emojis) == 0 {
 		content.WriteString("No emoji data found for this server.")
 	} else {
-		for i := 0; i < perPage; i++ {
+		for i := 0; i < min(perPage, len(emojis)); i++ {
 			e := emojis[i]
 			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 		}
@@ -391,7 +391,7 @@ func createStickerListMessage(stickers []StickerData, page int, totalPages int) 
 
 	embeds := []discord.Embed{}
 
-	for i := 0; i < perPage; i++ {
+	for i := 0; i < min(perPage, len(stickers)); i++ {
 		s := stickers[i]
 		embeds = append(embeds, discord.Embed{
 			Title: fmt.Sprintf("%s x%d", s.Name, s.Count),
