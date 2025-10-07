@@ -599,22 +599,6 @@ func handleInteractionCreate(i *gateway.InteractionCreateEvent) {
 	case discord.ComponentInteractionType:
 		handleButtonInteraction(i)
 	}
-
-	// Also track emojis/stickers from interaction messages
-	if !i.GuildID.IsValid() {
-		return
-	}
-
-	serverID := int64(i.GuildID)
-
-	// Check for message in interaction (e.g., button/select menu on a message with emojis)
-	if i.Message != nil && i.Message.Content != "" {
-		processCustomEmojis(i.Message.Content, serverID)
-
-		if len(i.Message.Stickers) > 0 {
-			processStickers(i.Message.Stickers, serverID)
-		}
-	}
 }
 
 // Register application commands
