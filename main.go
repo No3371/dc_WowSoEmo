@@ -90,7 +90,7 @@ func trackCustomEmoji(emojiName string, emojiID int64, serverID int64) error {
 func decreaseCustomEmoji(emojiID int64, serverID int64) error {
 	query := `
 		UPDATE emojis 
-		SET usage_count = GREATEST(0, usage_count - 1)
+		SET usage_count = MAX(0, usage_count - 1)
 		WHERE server_id = ? AND emote_id = ?
 	`
 	_, err := db.Exec(query, serverID, emojiID)
