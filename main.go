@@ -327,7 +327,6 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 		CustomID: discord.ComponentID("page_display"),
 		Label:    fmt.Sprintf("%d/%d", page+1, totalPages),
 		Style:    discord.SecondaryButtonStyle(),
-		Disabled: true,
 	})
 
 	if page < totalPages-1 {
