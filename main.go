@@ -666,6 +666,7 @@ func handlePageJumpInteraction(i *gateway.InteractionCreateEvent) {
 	if err != nil {
 		return
 	}
+	pageNum -= 1
 
 	totalEmojis, err := countEmojis(int64(i.GuildID))
 	if err != nil {
@@ -674,7 +675,7 @@ func handlePageJumpInteraction(i *gateway.InteractionCreateEvent) {
 
 	totalPages := totalEmojis/25 + 1
 
-	if pageNum < 1 || pageNum > totalPages {
+	if pageNum < 0 || pageNum > totalPages-1 {
 		return
 	}
 
