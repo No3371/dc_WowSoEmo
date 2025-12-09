@@ -317,28 +317,28 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 
 	if page > 0 {
 		row = append(row, &discord.ButtonComponent{
-			CustomID: discord.ComponentID(customIDPrefix + ":" + strconv.Itoa(page-1)),
+			CustomID: discord.ComponentID(fmt.Sprintf("%s:%d", customIDPrefix, page-1)),
 			Label:    "<",
 			Style:    discord.PrimaryButtonStyle(),
 		})
 	}
 
 	row = append(row, &discord.ButtonComponent{
-		CustomID: discord.ComponentID("page_display"),
+		CustomID: discord.ComponentID(fmt.Sprintf("%s:%d:jump", customIDPrefix, page)),
 		Label:    fmt.Sprintf("%d/%d", page+1, totalPages),
 		Style:    discord.SuccessButtonStyle(),
 	})
 
 	if page < totalPages-1 {
 		row = append(row, &discord.ButtonComponent{
-			CustomID: discord.ComponentID(customIDPrefix + ":" + strconv.Itoa(page+1)),
+			CustomID: discord.ComponentID(fmt.Sprintf("%s:%d", customIDPrefix, page+1)),
 			Label:    ">",
 			Style:    discord.PrimaryButtonStyle(),
 		})
 	}
 	if page < totalPages-2 {
 		row = append(row, &discord.ButtonComponent{
-			CustomID: discord.ComponentID(customIDPrefix + ":" + strconv.Itoa(min(page+10, totalPages-1))),
+			CustomID: discord.ComponentID(fmt.Sprintf("%s:%d", customIDPrefix, min(page+10, totalPages-1))),
 			Label:    ">>",
 			Style:    discord.PrimaryButtonStyle(),
 		})
@@ -581,21 +581,17 @@ func handleButtonInteraction(i *gateway.InteractionCreateEvent) {
 	}
 
 	customID := string(data.CustomID)
-	page := 0
-	var err error
-	if customID != "page_display" {
-		// Parse custom ID (format: "emoji_page:0" or "sticker_page:2")
-		parts := strings.Split(customID, ":")
-		if len(parts) != 2 {
-			return
-		}
-		page, err = strconv.Atoi(parts[1])
-		if err != nil {
-			return
-		}
+	// Parse custom ID (format: "emoji_page:0" or "sticker_page:2")
+	parts := strings.Split(customID, ":")
+	if len(parts) < 2 {
+		return
+	}
+	page, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return
 	}
 
-	if customID == "page_display" {
+	if len(parts) > 2 && parts[2] == "jump" {
 		resp := createPageJumpModalResponse(customID, page)
 		if err := botState.RespondInteraction(i.ID, i.Token, resp); err != nil {
 			log.Printf("Error responding to interaction: %v\n%+v", err, resp)
