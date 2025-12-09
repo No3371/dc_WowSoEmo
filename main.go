@@ -351,6 +351,7 @@ func createPageJumpModalResponse(customId string, page int) api.InteractionRespo
 	resp := api.InteractionResponse{
 		Type: api.ModalResponse,
 		Data: &api.InteractionResponseData{
+			Title: option.NewNullableString("Page Jump"),
 			CustomID: option.NewNullableString(customId),
 			Components: discord.ComponentsPtr(
 				&discord.TextInputComponent{
