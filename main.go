@@ -326,7 +326,7 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 	row = append(row, &discord.ButtonComponent{
 		CustomID: discord.ComponentID("page_display"),
 		Label:    fmt.Sprintf("%d/%d", page+1, totalPages),
-		Style:    discord.SecondaryButtonStyle(),
+		Style:    discord.SuccessButtonStyle(),
 	})
 
 	if page < totalPages-1 {
@@ -579,16 +579,18 @@ func handleButtonInteraction(i *gateway.InteractionCreateEvent) {
 	}
 
 	customID := string(data.CustomID)
-
-	// Parse custom ID (format: "emoji_page:0" or "sticker_page:2")
-	parts := strings.Split(customID, ":")
-	if len(parts) != 2 {
-		return
-	}
-
-	page, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return
+	page := 0
+	var err error
+	if customID != "page_display" {
+		// Parse custom ID (format: "emoji_page:0" or "sticker_page:2")
+		parts := strings.Split(customID, ":")
+		if len(parts) != 2 {
+			return
+		}
+		page, err = strconv.Atoi(parts[1])
+		if err != nil {
+			return
+		}
 	}
 
 	if customID == "page_display" {
