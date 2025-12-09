@@ -264,7 +264,7 @@ func countStickers(serverID int64) (int, error) {
 
 // Get emojis from database for a server
 func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
-	query := `SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	query := `SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? ORDER BY usage_count DESC, last_used DESC LIMIT ? OFFSET ?`
 	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -284,7 +284,7 @@ func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 
 // Get stickers from database for a server
 func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
-	query := `SELECT sticker_name, sticker_id, usage_count, last_used FROM stickers WHERE server_id = ? ORDER BY usage_count DESC LIMIT ? OFFSET ?`
+	query := `SELECT sticker_name, sticker_id, usage_count, last_used FROM stickers WHERE server_id = ? ORDER BY usage_count DESC, last_used DESC LIMIT ? OFFSET ?`
 	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -308,7 +308,7 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 
 	if page > 1 {
 		row = append(row, &discord.ButtonComponent{
-			CustomID: discord.ComponentID(customIDPrefix + ":0"),
+			CustomID: discord.ComponentID(fmt.Sprintf("%s:%d", customIDPrefix, max(page-10, 0))),
 			Label:    "<<",
 			Style:    discord.PrimaryButtonStyle(),
 		},
@@ -339,13 +339,32 @@ func createPaginationButtons(page, totalPages int, customIDPrefix string) *disco
 	}
 	if page < totalPages-2 {
 		row = append(row, &discord.ButtonComponent{
-			CustomID: discord.ComponentID(customIDPrefix + ":" + strconv.Itoa(totalPages-1)),
+			CustomID: discord.ComponentID(customIDPrefix + ":" + strconv.Itoa(min(page+10, totalPages-1))),
 			Label:    ">>",
 			Style:    discord.PrimaryButtonStyle(),
 		})
 	}
 
 	return &row
+}
+
+func createPageJumpModalResponse(customId string, page int) api.InteractionResponse {
+	resp := api.InteractionResponse{
+		Type: api.ModalResponse,
+		Data: &api.InteractionResponseData{
+			CustomID: option.NewNullableString(customId),
+			Components: discord.ComponentsPtr(
+				&discord.TextInputComponent{
+					CustomID:    "page_input",
+					Label:       "Page",
+					Placeholder: fmt.Sprintf("Go to page %d", page+1),
+					Value:       strconv.Itoa(page + 1),
+					Required:    true,
+				},
+			),
+		},
+	}
+	return resp
 }
 
 // Create emoji list message
@@ -431,7 +450,7 @@ func handleListEmotes(i *gateway.InteractionCreateEvent) {
 	share := false
 	if len(i.Data.(*discord.CommandInteraction).Options) > 0 {
 		opts := i.Data.(*discord.CommandInteraction).Options
-		share, _= opts.Find("share").BoolValue()
+		share, _ = opts.Find("share").BoolValue()
 	}
 
 	serverID := int64(i.GuildID)
@@ -479,7 +498,7 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 	share := false
 	if len(i.Data.(*discord.CommandInteraction).Options) > 0 {
 		opts := i.Data.(*discord.CommandInteraction).Options
-		share, _= opts.Find("share").BoolValue()
+		share, _ = opts.Find("share").BoolValue()
 	}
 
 	serverID := int64(i.GuildID)
@@ -573,6 +592,14 @@ func handleButtonInteraction(i *gateway.InteractionCreateEvent) {
 		return
 	}
 
+	if customID == "page_display" {
+		resp := createPageJumpModalResponse(customID, page)
+		if err := botState.RespondInteraction(i.ID, i.Token, resp); err != nil {
+			log.Printf("Error responding to interaction: %v\n%+v", err, resp)
+		}
+		return
+	}
+
 	serverID := int64(i.GuildID)
 
 	var response api.InteractionResponseData
@@ -628,6 +655,68 @@ func respondError(i *gateway.InteractionCreateEvent, message string) {
 	}
 }
 
+func handlePageJumpInteraction(i *gateway.InteractionCreateEvent) {
+	data := i.Data.(*discord.ModalInteraction)
+
+	input, is := data.Components.Find(discord.ComponentID("page_input")).(*discord.TextInputComponent)
+	if !is {
+		return
+	}
+
+	pageNum, err := strconv.Atoi(input.Value)
+	if err != nil {
+		return
+	}
+
+	totalEmojis, err := countEmojis(int64(i.GuildID))
+	if err != nil {
+		return
+	}
+
+	totalPages := totalEmojis/25 + 1
+
+	if pageNum < 1 || pageNum > totalPages {
+		return
+	}
+
+	var response api.InteractionResponseData
+	if strings.HasPrefix(string(data.CustomID), "emoji_page:") {
+		totalEmojis, err := countEmojis(int64(i.GuildID))
+		if err != nil {
+			log.Printf("Error counting emojis: %v", err)
+			return
+		}
+		emojis, err := getEmojis(int64(i.GuildID), 25*pageNum, 25)
+		if err != nil {
+			log.Printf("Error fetching emojis: %v", err)
+			return
+		}
+		response = createEmojiListMessage(emojis, pageNum, totalEmojis/25+1)
+	} else if strings.HasPrefix(string(data.CustomID), "sticker_page:") {
+		totalStickers, err := countStickers(int64(i.GuildID))
+		if err != nil {
+			log.Printf("Error counting stickers: %v", err)
+			return
+		}
+		stickers, err := getStickers(int64(i.GuildID), 5*pageNum, 5)
+		if err != nil {
+			log.Printf("Error fetching stickers: %v", err)
+			return
+		}
+		response = createStickerListMessage(stickers, pageNum, totalStickers/5+1)
+	} else {
+		return
+	}
+
+	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
+		Type: api.UpdateMessage,
+		Data: &response,
+	}); err != nil {
+		log.Printf("Error updating message: %v", err)
+	}
+
+}
+
 // Handle interaction creation events
 func handleInteractionCreate(i *gateway.InteractionCreateEvent) {
 	// Handle commands and buttons
@@ -636,6 +725,8 @@ func handleInteractionCreate(i *gateway.InteractionCreateEvent) {
 		handleCommandInteraction(i)
 	case discord.ComponentInteractionType:
 		handleButtonInteraction(i)
+	case discord.ModalInteractionType:
+		handlePageJumpInteraction(i)
 	}
 }
 
