@@ -359,6 +359,7 @@ func createPageJumpModalResponse(customId string, page int) api.InteractionRespo
 					Placeholder: fmt.Sprintf("Go to page %d", page+1),
 					Value:       strconv.Itoa(page + 1),
 					Required:    true,
+					Style: discord.TextInputShortStyle,
 				},
 			),
 		},
