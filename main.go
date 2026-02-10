@@ -363,7 +363,7 @@ func countStickers(serverID int64) (int, error) {
 
 // Get emojis from database for a server
 func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
-	query := `SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? ORDER BY usage_count DESC, last_used DESC LIMIT ? OFFSET ?`
+	query := `SELECT emote_name, emote_id, usage_count, last_used, animated FROM emojis WHERE server_id = ? ORDER BY usage_count DESC, last_used DESC LIMIT ? OFFSET ?`
 	rows, err := db.Query(query, serverID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -373,7 +373,7 @@ func getEmojis(serverID int64, offset int, limit int) ([]EmojiData, error) {
 	var emojis []EmojiData
 	for rows.Next() {
 		var e EmojiData
-		if err := rows.Scan(&e.Name, &e.ID, &e.Count, &e.LastUsed); err != nil {
+		if err := rows.Scan(&e.Name, &e.ID, &e.Count, &e.LastUsed, &e.Animated); err != nil {
 			return nil, err
 		}
 		emojis = append(emojis, e)
