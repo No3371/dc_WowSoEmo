@@ -502,7 +502,7 @@ func createEmojiListMessage(emojis []EmojiData, page int, totalPages int) api.In
 		for i := 0; i < min(perPage, len(emojis)); i++ {
 			e := emojis[i]
 			if e.Animated {
-				content.WriteString(fmt.Sprintf("- <:a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+				content.WriteString(fmt.Sprintf("- <a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 			} else {
 				content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 			}
@@ -725,7 +725,7 @@ func handleListLeastUsed(i *gateway.InteractionCreateEvent) {
 	} else {
 		for _, e := range topCandidates {
 			if e.Animated {
-				content.WriteString(fmt.Sprintf("- <:a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+				content.WriteString(fmt.Sprintf("- <a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 			} else {
 				content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
 			}
