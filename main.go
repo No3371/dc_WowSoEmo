@@ -29,32 +29,113 @@ var (
 	botState         *state.State
 )
 
-// Database schema
-const schema = `
-CREATE TABLE IF NOT EXISTS emojis (
-	server_id BIGINT,
-	emote_id BIGINT,
-	emote_name TEXT NOT NULL,
-	usage_count INTEGER DEFAULT 1,
-	first_used DATETIME DEFAULT CURRENT_TIMESTAMP,
-	last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY(server_id, emote_id)
-);
+// Database migrations
+type migration struct {
+	version int
+	up      func(tx *sql.Tx) error
+}
 
-CREATE TABLE IF NOT EXISTS stickers (
-	server_id BIGINT,
-	sticker_id BIGINT,
-	sticker_name TEXT NOT NULL,
-	usage_count INTEGER DEFAULT 1,
-	first_used DATETIME DEFAULT CURRENT_TIMESTAMP,
-	last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY(server_id, sticker_id)
-);
+var migrations = []migration{
+	{
+		version: 1,
+		up: func(tx *sql.Tx) error {
+			query := `
+			CREATE TABLE IF NOT EXISTS emojis (
+				server_id BIGINT,
+				emote_id BIGINT,
+				emote_name TEXT NOT NULL,
+				usage_count INTEGER DEFAULT 1,
+				first_used DATETIME DEFAULT CURRENT_TIMESTAMP,
+				last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(server_id, emote_id)
+			);
 
-CREATE INDEX IF NOT EXISTS idx_emojis_server_id_emote_id_usage_count ON emojis(server_id, emote_id, usage_count);
+			CREATE TABLE IF NOT EXISTS stickers (
+				server_id BIGINT,
+				sticker_id BIGINT,
+				sticker_name TEXT NOT NULL,
+				usage_count INTEGER DEFAULT 1,
+				first_used DATETIME DEFAULT CURRENT_TIMESTAMP,
+				last_used DATETIME DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY(server_id, sticker_id)
+			);
 
-CREATE INDEX IF NOT EXISTS idx_stickers_server_id_sticker_id_usage_count ON stickers(server_id, sticker_id, usage_count);
-`
+			CREATE INDEX IF NOT EXISTS idx_emojis_server_id_emote_id_usage_count ON emojis(server_id, emote_id, usage_count);
+			CREATE INDEX IF NOT EXISTS idx_stickers_server_id_sticker_id_usage_count ON stickers(server_id, sticker_id, usage_count);
+			`
+			_, err := tx.Exec(query)
+			return err
+		},
+	},
+	{
+		version: 2,
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec("ALTER TABLE emojis ADD COLUMN animated BOOLEAN DEFAULT FALSE")
+			return err
+		},
+	},
+}
+
+func migrate(db *sql.DB) error {
+	var currentVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
+		return fmt.Errorf("failed to get user_version: %w", err)
+	}
+
+	// Handle unversioned existing databases
+	if currentVersion == 0 {
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='emojis'").Scan(&count); err != nil {
+			return fmt.Errorf("failed to check tables: %w", err)
+		}
+
+		if count > 0 {
+			// Table exists, check for 'animated' column to determine state
+			var hasAnimated int
+			if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('emojis') WHERE name='animated'").Scan(&hasAnimated); err != nil {
+				return fmt.Errorf("failed to check schema columns: %w", err)
+			}
+
+			if hasAnimated > 0 {
+				currentVersion = 2 // Already has V2 changes
+			} else {
+				currentVersion = 1 // Basic V1 state
+			}
+
+			// Update DB version to match detected state
+			if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", currentVersion)); err != nil {
+				return fmt.Errorf("failed to set initial user_version: %w", err)
+			}
+			log.Printf("Detected existing database at version %d", currentVersion)
+		}
+	}
+
+	for _, m := range migrations {
+		if m.version > currentVersion {
+			log.Printf("Applying migration version %d...", m.version)
+			tx, err := db.Begin()
+			if err != nil {
+				return fmt.Errorf("failed to begin transaction: %w", err)
+			}
+
+			if err := m.up(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d failed: %w", m.version, err)
+			}
+
+			if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to update user_version: %w", err)
+			}
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit migration %d: %w", m.version, err)
+			}
+			currentVersion = m.version
+		}
+	}
+	return nil
+}
 
 // Cache for guild emojis
 type CachedEmojiList struct {
@@ -74,8 +155,8 @@ func initDB() error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("failed to create schema: %w", err)
+	if err := migrate(db); err != nil {
+		return fmt.Errorf("database migration failed: %w", err)
 	}
 
 	log.Println("Database initialized successfully")
@@ -83,15 +164,16 @@ func initDB() error {
 }
 
 // Track custom emoji usage
-func trackCustomEmoji(emojiName string, emojiID int64, serverID int64) error {
+func trackCustomEmoji(emojiName string, emojiID int64, serverID int64, animated bool) error {
 	query := `
-		INSERT INTO emojis (server_id, emote_id, emote_name, usage_count)
-		VALUES (?, ?, ?, 1)
+		INSERT INTO emojis (server_id, emote_id, emote_name, usage_count, animated)
+		VALUES (?, ?, ?, 1, ?)
 		ON CONFLICT(server_id, emote_id) DO UPDATE SET
 			usage_count = usage_count + 1,
-			last_used = CURRENT_TIMESTAMP
+			last_used = CURRENT_TIMESTAMP,
+			animated = ?
 	`
-	_, err := db.Exec(query, serverID, emojiID, emojiName)
+	_, err := db.Exec(query, serverID, emojiID, emojiName, animated, animated)
 	if err != nil {
 		return fmt.Errorf("failed to track custom emoji: %w", err)
 	}
@@ -132,6 +214,10 @@ func trackSticker(stickerID int64, stickerName string, serverID int64) error {
 func processCustomEmojis(content string, serverID int64) {
 	matches := customEmojiRegex.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
+		animated := false
+		if strings.Contains(match[0], "<a:") {
+			animated = true
+		}
 		if len(match) == 3 {
 			emojiName := match[1]
 			emojiIDStr := match[2]
@@ -142,7 +228,7 @@ func processCustomEmojis(content string, serverID int64) {
 				continue
 			}
 
-			if err := trackCustomEmoji(emojiName, emojiID, serverID); err != nil {
+			if err := trackCustomEmoji(emojiName, emojiID, serverID, animated); err != nil {
 				log.Printf("Error tracking custom emoji %s: %v", emojiName, err)
 			} else {
 				log.Printf("Tracked custom emoji: %s (ID: %d)", emojiName, emojiID)
@@ -204,7 +290,7 @@ func handleMessageReactionAdd(r *gateway.MessageReactionAddEvent) {
 	emojiID := int64(r.Emoji.ID)
 	emojiName := r.Emoji.Name
 
-	if err := trackCustomEmoji(emojiName, emojiID, serverID); err != nil {
+	if err := trackCustomEmoji(emojiName, emojiID, serverID, r.Emoji.Animated); err != nil {
 		log.Printf("Error tracking reaction emoji %s: %v", emojiName, err)
 	} else {
 		log.Printf("Tracked reaction emoji: %s (ID: %d)", emojiName, emojiID)
@@ -239,6 +325,7 @@ type EmojiData struct {
 	ID       int64
 	Count    int
 	LastUsed time.Time
+	Animated bool
 }
 
 // Sticker data for pagination
@@ -414,7 +501,11 @@ func createEmojiListMessage(emojis []EmojiData, page int, totalPages int) api.In
 	} else {
 		for i := 0; i < min(perPage, len(emojis)); i++ {
 			e := emojis[i]
-			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			if e.Animated {
+				content.WriteString(fmt.Sprintf("- <:a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			} else {
+				content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			}
 		}
 	}
 
@@ -633,7 +724,11 @@ func handleListLeastUsed(i *gateway.InteractionCreateEvent) {
 		content.WriteString("No tracked emojis found in the current guild list.")
 	} else {
 		for _, e := range topCandidates {
-			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			if e.Animated {
+				content.WriteString(fmt.Sprintf("- <:a:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			} else {
+				content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+			}
 		}
 	}
 
