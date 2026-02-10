@@ -214,11 +214,11 @@ func trackSticker(stickerID int64, stickerName string, serverID int64) error {
 func processCustomEmojis(content string, serverID int64) {
 	matches := customEmojiRegex.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
-		animated := false
-		if strings.Contains(match[0], "<a:") {
-			animated = true
-		}
 		if len(match) == 3 {
+			animated := false
+			if strings.Contains(match[0], "<a:") {
+				animated = true
+			}
 			emojiName := match[1]
 			emojiIDStr := match[2]
 
@@ -231,7 +231,7 @@ func processCustomEmojis(content string, serverID int64) {
 			if err := trackCustomEmoji(emojiName, emojiID, serverID, animated); err != nil {
 				log.Printf("Error tracking custom emoji %s: %v", emojiName, err)
 			} else {
-				log.Printf("Tracked custom emoji: %s (ID: %d)", emojiName, emojiID)
+				log.Printf("Tracked custom emoji: %s (ID: %d) (Anim: %s)", emojiName, emojiID, animated)
 			}
 		}
 	}
@@ -293,7 +293,7 @@ func handleMessageReactionAdd(r *gateway.MessageReactionAddEvent) {
 	if err := trackCustomEmoji(emojiName, emojiID, serverID, r.Emoji.Animated); err != nil {
 		log.Printf("Error tracking reaction emoji %s: %v", emojiName, err)
 	} else {
-		log.Printf("Tracked reaction emoji: %s (ID: %d)", emojiName, emojiID)
+		log.Printf("Tracked reaction emoji: %s (ID: %d) (Anim: %s)", emojiName, emojiID, r.Emoji.Animated)
 	}
 }
 
