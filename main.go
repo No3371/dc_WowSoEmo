@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diamondburned/arikawa/v3/api"
@@ -55,6 +56,17 @@ CREATE INDEX IF NOT EXISTS idx_emojis_server_id_emote_id_usage_count ON emojis(s
 CREATE INDEX IF NOT EXISTS idx_stickers_server_id_sticker_id_usage_count ON stickers(server_id, sticker_id, usage_count);
 `
 
+// Cache for guild emojis
+type CachedEmojiList struct {
+	Emojis    []discord.Emoji
+	ExpiresAt time.Time
+}
+
+var (
+	emojiCache      = make(map[discord.GuildID]CachedEmojiList)
+	emojiCacheMutex sync.Mutex
+)
+
 func initDB() error {
 	var err error
 	db, err = sql.Open("sqlite3", "./emote_tracker.db")
@@ -89,7 +101,7 @@ func trackCustomEmoji(emojiName string, emojiID int64, serverID int64) error {
 // Decrease custom emoji usage count
 func decreaseCustomEmoji(emojiID int64, serverID int64) error {
 	query := `
-		UPDATE emojis 
+		UPDATE emojis
 		SET usage_count = MAX(0, usage_count - 1)
 		WHERE server_id = ? AND emote_id = ?
 	`
@@ -302,6 +314,28 @@ func getStickers(serverID int64, offset int, limit int) ([]StickerData, error) {
 	return stickers, nil
 }
 
+// Retrieve guild emojis (with caching)
+func getGuildEmojis(s *state.State, guildID discord.GuildID) ([]discord.Emoji, error) {
+	emojiCacheMutex.Lock()
+	defer emojiCacheMutex.Unlock()
+
+	if cached, ok := emojiCache[guildID]; ok && time.Now().Before(cached.ExpiresAt) {
+		return cached.Emojis, nil
+	}
+
+	emojis, err := s.Emojis(guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	emojiCache[guildID] = CachedEmojiList{
+		Emojis:    emojis,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+
+	return emojis, nil
+}
+
 // Create pagination buttons
 func createPaginationButtons(page, totalPages int, customIDPrefix string) *discord.ActionRowComponent {
 	row := discord.ActionRowComponent{}
@@ -351,7 +385,7 @@ func createPageJumpModalResponse(customId string, page int) api.InteractionRespo
 	resp := api.InteractionResponse{
 		Type: api.ModalResponse,
 		Data: &api.InteractionResponseData{
-			Title: option.NewNullableString("Page Jump"),
+			Title:    option.NewNullableString("Page Jump"),
 			CustomID: option.NewNullableString(customId),
 			Components: discord.ComponentsPtr(
 				&discord.TextInputComponent{
@@ -360,7 +394,7 @@ func createPageJumpModalResponse(customId string, page int) api.InteractionRespo
 					Placeholder: fmt.Sprintf("Go to page %d", page+1),
 					Value:       strconv.Itoa(page + 1),
 					Required:    true,
-					Style: discord.TextInputShortStyle,
+					Style:       discord.TextInputShortStyle,
 				},
 			),
 		},
@@ -438,6 +472,8 @@ func handleCommandInteraction(i *gateway.InteractionCreateEvent) {
 		handleListStickers(i)
 	case "resetcount":
 		handleResetCount(i)
+	case "listleastused":
+		handleListLeastUsed(i)
 	}
 }
 
@@ -533,6 +569,85 @@ func handleListStickers(i *gateway.InteractionCreateEvent) {
 		Data: &response,
 	}); err != nil {
 		log.Printf("Error responding to interaction: %v\n%+v", err, response)
+	}
+}
+
+// Handle /listleastused command
+func handleListLeastUsed(i *gateway.InteractionCreateEvent) {
+	if !isInGuild(&i.InteractionEvent) {
+		respondError(i, "This command can only be used in a server.")
+		return
+	}
+
+	serverID := i.GuildID
+
+	// Get live emojis (cached)
+	liveEmojis, err := getGuildEmojis(botState, serverID)
+	if err != nil {
+		log.Printf("Error fetching guild emojis: %v", err)
+		respondError(i, "Failed to fetch guild emojis.")
+		return
+	}
+
+	if len(liveEmojis) == 0 {
+		respondError(i, "No custom emojis found in this server.")
+		return
+	}
+
+	args := make([]interface{}, 0, len(liveEmojis)+1)
+	args = append(args, int64(serverID))
+
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString("SELECT emote_name, emote_id, usage_count, last_used FROM emojis WHERE server_id = ? AND emote_id IN (")
+
+	for i, emoji := range liveEmojis {
+		if i > 0 {
+			queryBuilder.WriteString(",")
+		}
+		queryBuilder.WriteString("?")
+		args = append(args, int64(emoji.ID))
+	}
+	queryBuilder.WriteString(") ORDER BY usage_count ASC, last_used ASC LIMIT 25")
+
+	rows, err := db.Query(queryBuilder.String(), args...)
+	if err != nil {
+		log.Printf("Error fetching emoji usage: %v", err)
+		respondError(i, "Failed to fetch usage data.")
+		return
+	}
+	defer rows.Close()
+
+	var topCandidates []EmojiData
+	for rows.Next() {
+		var e EmojiData
+		if err := rows.Scan(&e.Name, &e.ID, &e.Count, &e.LastUsed); err != nil {
+			log.Printf("Error scanning row: %v", err)
+			continue
+		}
+		topCandidates = append(topCandidates, e)
+	}
+
+	var content strings.Builder
+	content.WriteString("**Least Used Custom Emojis (tracked)**\n\n")
+	if len(topCandidates) == 0 {
+		content.WriteString("No tracked emojis found in the current guild list.")
+	} else {
+		for _, e := range topCandidates {
+			content.WriteString(fmt.Sprintf("- <:%s:%d> **x%d** (Last: <t:%d:R>)\n", e.Name, e.ID, e.Count, e.LastUsed.Unix()))
+		}
+	}
+
+	response := api.InteractionResponseData{
+		Content: option.NewNullableString(content.String()),
+		Flags:   discord.EphemeralMessage,
+	}
+
+	// Respond
+	if err := botState.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
+		Type: api.MessageInteractionWithSource,
+		Data: &response,
+	}); err != nil {
+		log.Printf("Error responding to interaction: %v", err)
 	}
 }
 
@@ -754,6 +869,11 @@ func registerCommands(s *state.State, appID discord.AppID) error {
 		{
 			Name:                     "resetcount",
 			Description:              "Reset all emoji and sticker counts for this server (Moderator only)",
+			DefaultMemberPermissions: manageGuildPerm,
+		},
+		{
+			Name:                     "listleastused",
+			Description:              "List least used emojis from the current guild list found in the database",
 			DefaultMemberPermissions: manageGuildPerm,
 		},
 	}
